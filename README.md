@@ -39,7 +39,7 @@ This bridge synchronizes body motion only. Facial expressions (Face) are not syn
 
 ```bash
 pip install -r requirements.txt
-
+```
 ---
 
 ## Citation
