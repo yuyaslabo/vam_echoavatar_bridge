@@ -46,19 +46,20 @@ pip install -r requirements.txt
 ---
 
 ## Hint: VaM Optimization
-For VaM users, some optional adjustments can be made in the official EchoAvatar inference script: 
+For VaM users, some optional adjustments can be made in the official EchoAvatar inference script to optimize performance and movement:
 
-* Disable Face inference  
-If you only need body motion, you can comment out the Face-related inference code to avoid unnecessary processing.  
-* Reduce horizontal translation  
-In get_joint_pos(pred_motion), you can reduce the amount of character translation:
+* **Disable Face inference**  
+  If you only need body motion, you can comment out the Face-related inference code to avoid unnecessary processing.
+* **Reduce horizontal translation**  
+  In `get_joint_pos(pred_motion)`, you can reduce the amount of character translation:
+  ```python
+  trans_x *= 0.7  
+  trans_y *= 0.7  
+  ```
+  This can help keep the character's movement more suitable for VaM.
 
-trans_x *= 0.7  
-trans_y *= 0.7  
-
-This can help keep the character's movement more suitable for VaM.  
-These are optional adjustments for VaM use and are not required for the bridge itself.  
-These adjustments can be made in the official EchoAvatar scripts/...py inference script.
+> [!TIP]
+> These are optional adjustments for VaM use and are not required for the bridge itself. These adjustments can be made in the official EchoAvatar `scripts/...py` inference script.
 
 ---
 
