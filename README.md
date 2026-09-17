@@ -19,10 +19,14 @@ This bridge synchronizes body motion only. Facial expressions (Face) are not syn
 
 ## Setup Instructions
 1. Ensure the official EchoAvatar environment and sample work.
-2. Run the Python bridge: `python vam_echoavatar_bridge.py`
-3. Load `EchoAvatarReceiver.cs` into VaM.
-4. Start the EchoAvatar engine and wait for connection.
-5. Send audio via `python tools/pushwav2server.py`.
+2. Install the Python dependencies:
+```bash
+pip install -r requirements.txt
+```
+3. Run the Python bridge: `python vam_echoavatar_bridge.py`
+4. Load `EchoAvatarReceiver.cs` into VaM.
+5. Start the EchoAvatar engine and wait for connection.
+6. Start the official EchoAvatar tool:`python tools/pushwav2server.py`.
 
 ---
 
@@ -37,9 +41,7 @@ This bridge synchronizes body motion only. Facial expressions (Face) are not syn
 * Virt-A-Mate, Python 3.x, and a working EchoAvatar environment.
 * Original Project: [RobinWitch/EchoAvatar](https://github.com/RobinWitch/EchoAvatar)
 
-```bash
-pip install -r requirements.txt
-```
+
 ---
 
 ## Citation
