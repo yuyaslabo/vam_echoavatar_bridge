@@ -4,7 +4,7 @@ An unofficial bridge for using **EchoAvatar** with **Virt-A-Mate (VaM)**.
 
 > [!NOTE]
 > This is an unofficial community-made bridge tool not affiliated with EchoAvatar or MeshedVR.
-
+DEMO:https://youtube.com/shorts/Mhf0ZUzQPzc?si=KyB_LKNODmw0s9JO
 ---
 
 ## Overview
