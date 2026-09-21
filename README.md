@@ -29,7 +29,7 @@ This bridge synchronizes body motion only. Facial expressions (Face) are not syn
 [Audio Input] → Streamer → EchoAvatar Engine (Linux)
                                  │
                                  ├── (Motion Data) ──> [UDP 9998] ──> EchoAvatarReceiver.cs (VaM)
-                                 └── (Audio Return) ──> [UDP 9999] ──> Real-Time Audio inside VaM
+                                 └── (Audio Return) ──> [UDP 9999] ──> EchoAvatarAudioReceiver.cs (VaM)
 ```
 
 ---
