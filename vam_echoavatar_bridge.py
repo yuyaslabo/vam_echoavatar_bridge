@@ -4,6 +4,8 @@ import json
 import numpy as np
 import time
 import threading
+import base64
+import sounddevice as sd
 from collections import deque
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
@@ -21,6 +23,11 @@ def main():
     UNITY_TCP_IP = "127.0.0.1"
     UNITY_TCP_PORT = 12348  #debug official unity project
     unity_tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    
+    AUDIO_UDP_IP = "127.0.0.1"
+    AUDIO_UDP_PORT = 9999
+
+    audio_udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     
     global is_unity_connected
     
@@ -201,18 +208,34 @@ def main():
         bone_init_rotations[bone_to_idx[name]] = R.from_quat(setup['init_rot'])
     
     # ============================================================
-    # Chunk Buffer & Threading Conditions
+    # Frame Buffer & Threading Conditions
     # ============================================================
-    chunk_buffer = deque()
+    # Chunk単位ではなく、受信したChunkを1フレームずつ展開して保持する。
+    # これにより「2チャンク固定」の待ち時間をなくし、フレーム数を
+    # 基準に再生速度をリアルタイム制御できる。
+    frame_buffer = deque()
+    buffered_frame_count = 0
     buffer_condition = threading.Condition()
 
-    # 再生速度制御の定数定義
-    # 目標バッファは概ね2チャンク。実際の速度切替はヒステリシスで行う。
-    TARGET_CHUNKS = 2
-    CATCHUP_START_CHUNKS = 4
-    CATCHUP_END_CHUNKS = 1
-    CATCHUP_SPEED = 1.3
+    # ------------------------------------------------------------
+    # フレームバッファによる再生速度制御
+    #
+    # 60fps入力を想定した値。
+    # 12 frames ≒ 200ms を通常時の目標バッファとする。
+    #
+    # フレームは一切捨てない。
+    # バッファが目標を超えた場合だけ、1.00～1.15xの範囲で
+    # 再生を少し速くして余分な遅延を自然に消化する。
+    # ------------------------------------------------------------
+    TARGET_BUFFER_FRAMES = 20
+    MAX_PLAYBACK_SPEED = 1.30
     NORMAL_SPEED = 1.0
+    SPEED_PER_EXTRA_FRAME = 0.01
+    SPEED_RESPONSE = 0.005
+
+    # 入力フレームレート。現在のEchoAvatarは60fps系を想定。
+    INPUT_FPS = 60.0
+    FRAME_DURATION = 1.0 / INPUT_FPS
 
     # ------------------------------------------------------------
     # UDP送信フレーム間引き
@@ -222,12 +245,352 @@ def main():
     SEND_EVERY_OTHER_FRAME = True
 
     playback_speed = NORMAL_SPEED
+    
+    # ============================================================
+    # Audio playback
+    # ============================================================
+
+    audio_buffer = deque()
+    audio_buffer_lock = threading.Lock()
+
+    AUDIO_SAMPLE_RATE = 24000
+    AUDIO_CHANNELS = 1
+    AUDIO_SAMPLE_WIDTH = 2       # 16bit
+    AUDIO_ENABLED = True
+
+    # OutputStream の1回のcallbackサイズ
+    # 24000Hz × 20ms = 480 samples
+    AUDIO_BLOCKSIZE = 480
+
+    audio_stream = None
+
+    # 現在再生中のPCM chunk
+    audio_current = None
+    audio_current_pos = 0
+
+    # Audioの再生開始をMotion側にも知らせる
+    timeline_started = threading.Event()
+
+    # デバッグ
+    audio_played_samples = 0
+    audio_underrun_count = 0
+    
+    def audio_callback(outdata, frames, time_info, status):
+
+        nonlocal audio_current
+        nonlocal audio_current_pos
+        nonlocal audio_played_samples
+        nonlocal audio_underrun_count
+
+        #if status:
+
+            # 毎回表示するとログが大量になるので、
+            # 必要な場合だけ確認
+            # print(
+                # "[Audio][Callback] status:",
+                # status
+            # )
+
+        # 出力を無音で初期化
+        outdata.fill(0)
+
+        output_pos = 0
+
+        while output_pos < frames:
+
+            # ----------------------------------------------------
+            # 現在のchunkが無くなったら次のchunkを取得
+            # ----------------------------------------------------
+
+            if (
+                audio_current is None
+                or audio_current_pos >= len(audio_current)
+            ):
+
+                with audio_buffer_lock:
+
+                    if len(audio_buffer) > 0:
+
+                        audio_current = audio_buffer.popleft()
+                        audio_current_pos = 0
+
+                    else:
+
+                        audio_current = None
+
+                # Queueが空
+                if audio_current is None:
+
+                    audio_underrun_count += 1
+
+                    break
+
+            # ----------------------------------------------------
+            # 今回コピーできるサンプル数
+            # ----------------------------------------------------
+
+            remaining_audio = (
+                len(audio_current)
+                - audio_current_pos
+            )
+
+            remaining_output = (
+                frames
+                - output_pos
+            )
+
+            copy_count = min(
+                remaining_audio,
+                remaining_output
+            )
+
+            # ----------------------------------------------------
+            # PCMをOutputStreamへコピー
+            # ----------------------------------------------------
+
+            outdata[
+                output_pos:
+                output_pos + copy_count,
+                0
+            ] = audio_current[
+                audio_current_pos:
+                audio_current_pos + copy_count
+            ]
+
+            audio_current_pos += copy_count
+            output_pos += copy_count
+
+            audio_played_samples += copy_count
+
+    # def audio_playback_worker():
+
+        # global audio_stream
+
+        # print("[Audio] =======================================")
+        # print("[Audio] Continuous Audio Playback")
+        # print("[Audio] sample rate :", AUDIO_SAMPLE_RATE)
+        # print("[Audio] channels    :", AUDIO_CHANNELS)
+        # print("[Audio] blocksize   :", AUDIO_BLOCKSIZE)
+        # print("[Audio] =======================================")
+
+        # # --------------------------------------------------------
+        # # 最初のaudioが到着するまで待つ
+        # # --------------------------------------------------------
+
+        # while True:
+
+            # with audio_buffer_lock:
+
+                # if len(audio_buffer) > 0:
+                    # break
+
+            # time.sleep(0.001)
+
+        # print(
+            # "[Audio] First audio chunk received"
+        # )
+
+        # # --------------------------------------------------------
+        # # OutputStream生成
+        # # --------------------------------------------------------
+
+        # # try:
+
+            # # audio_stream = sd.OutputStream(
+                # # samplerate=AUDIO_SAMPLE_RATE,
+                # # channels=AUDIO_CHANNELS,
+                # # dtype="int16",
+                # # blocksize=AUDIO_BLOCKSIZE,
+                # # callback=audio_callback
+            # # )
+
+            # # print(
+                # # "[Audio] OutputStream created"
+            # # )
+
+            # # # ----------------------------------------------------
+            # # # Motionと共通のタイムライン開始
+            # # # ----------------------------------------------------
+
+            # # print(
+                # # "[Audio] Starting shared timeline..."
+            # # )
+
+            # # audio_stream.start()
+
+            # # timeline_started.set()
+
+            # # print(
+                # # "[Audio] Timeline START"
+            # # )
+
+        # # except Exception as e:
+
+            # # print(
+                # # "[Audio] OutputStream ERROR:",
+                # # repr(e)
+            # # )
+
+            # # import traceback
+            # # traceback.print_exc()
+
+            # return
+
+        # # --------------------------------------------------------
+        # # Stream監視
+        # # --------------------------------------------------------
+
+        # while True:
+
+            # time.sleep(1.0)
+
+            # with audio_buffer_lock:
+                # queue_count = len(audio_buffer)
+
+            # played_ms = (
+                # audio_played_samples
+                # / AUDIO_SAMPLE_RATE
+                # * 1000.0
+            # )
+
+            # # print(
+                # # "[Audio]"
+                # # " Queue:", queue_count,
+                # # "| Played:", int(played_ms), "ms",
+                # # "| Underrun:", audio_underrun_count
+            # # )
+
+    def decode_audio(audio_data):
+
+        """
+        data_dict["audio"] を numpy int16 PCM に変換
+        """
+
+        # print("[Audio][Decode] input type:",type(audio_data).__name__)
+
+        # --------------------------------------------------------
+        # Base64
+        # --------------------------------------------------------
+        if isinstance(audio_data, str):
+
+            print(
+                "[Audio][Decode] Base64 string length:",
+                len(audio_data)
+            )
+
+            try:
+                import base64
+
+                raw = base64.b64decode(audio_data)
+
+                print(
+                    "[Audio][Decode] Base64 decoded bytes:",
+                    len(raw)
+                )
+
+                audio = np.frombuffer(
+                    raw,
+                    dtype=np.int16
+                ).copy()
+
+            except Exception as e:
+
+                print(
+                    "[Audio][Decode] Base64 decode ERROR:",
+                    repr(e)
+                )
+
+                return None
+
+        # --------------------------------------------------------
+        # integer array
+        # --------------------------------------------------------
+        elif isinstance(audio_data, list):
+
+            #print("[Audio][Decode] list length:",len(audio_data))
+
+            if len(audio_data) == 0:
+
+                #print("[Audio][Decode] WARNING: empty audio list")
+
+                return None
+
+            try:
+
+                audio_array = np.asarray(
+                    audio_data
+                )
+
+                #print("[Audio][Decode] numpy dtype:",audio_array.dtype)
+                #print("[Audio][Decode] numpy shape:",audio_array.shape)
+                #print( "[Audio][Decode] min/max:",audio_array.min(),audio_array.max())
+
+                if np.issubdtype(audio_array.dtype, np.floating):
+
+                    # print("[Audio][Decode] detected normalized FLOAT audio")
+
+                    audio = np.clip(
+                        audio_array,
+                        -1.0,
+                        1.0
+                    )
+
+                    audio = (
+                        audio * 32767.0
+                    ).astype(np.int16)
+
+                else:
+
+                    print(
+                        "[Audio][Decode] detected INTEGER audio"
+                    )
+
+                    audio = audio_array.astype(
+                        np.int16
+                    )
+
+            except Exception as e:
+
+                print(
+                    "[Audio][Decode] array conversion ERROR:",
+                    repr(e)
+                )
+
+                return None
+
+        else:
+
+            print(
+                "[Audio][Decode] UNKNOWN audio type:",
+                type(audio_data)
+            )
+
+            return None
+
+        # --------------------------------------------------------
+        # 結果確認
+        # --------------------------------------------------------
+
+        if audio is None or len(audio) == 0:
+
+            print(
+                "[Audio][Decode] ERROR: decoded audio is empty"
+            )
+
+            return None
+
+
+        return audio
+
+
+    
 
     # ============================================================
     # TCP受信Worker (推論データをノンストップで回収してキューへ投入)
     # ============================================================
     def receive_worker(client_socket):
         global is_unity_connected
+        nonlocal buffered_frame_count
         nonlocal playback_speed
         print("\n[Thread] Receive Worker Started.")
         while True:
@@ -291,32 +654,85 @@ def main():
             frame_count = min(len(data_dict["pose"]), len(data_dict["trans"]))
             if frame_count <= 0:
                 continue
+                
+            if AUDIO_ENABLED and "audio" in data_dict:
+                
+                audio_array = np.asarray(data_dict["audio"])
+
+                # float audio (-1.0 ～ +1.0) → int16 PCM
+                if np.issubdtype(audio_array.dtype, np.floating):
+                    audio_array = np.clip(audio_array, -1.0, 1.0)
+                    audio_int16 = (audio_array * 32767.0).astype(np.int16)
+                else:
+                    audio_int16 = audio_array.astype(np.int16)
+                    
+                # 最初のAudioデータを受信した時点でMotion側を開始
+                if not timeline_started.is_set():
+                    timeline_started.set()
+                    print("[Audio] Timeline started")
+
+                # 24kHz / mono
+                # 20ms = 480 samples = 960 bytes
+                AUDIO_BLOCK_SAMPLES = 480
+
+                for start in range(0, len(audio_int16), AUDIO_BLOCK_SAMPLES):
+                    block = audio_int16[start:start + AUDIO_BLOCK_SAMPLES]
+
+                    if len(block) == 0:
+                        continue
+
+                    audio_udp_sock.sendto(
+                        block.tobytes(),
+                        (AUDIO_UDP_IP, AUDIO_UDP_PORT)
+                    )
+
+                audio = decode_audio(data_dict["audio"])
+
+                if audio is not None and len(audio) > 0:
+
+                    with audio_buffer_lock:
+
+                        audio_buffer.append(audio)
+
+                        queue_count = len(audio_buffer)
+
+                    # print(
+                        # "[Audio][Receive]"
+                        # " queued:",
+                        # len(audio),
+                        # "samples",
+                        # "| duration:",
+                        # round(
+                            # len(audio) / AUDIO_SAMPLE_RATE * 1000
+                        # ),
+                        # "ms",
+                        # "| queue:",
+                        # queue_count
+                    # )
 
             # ----------------------------------------------------
-            # 5. ChunkをBufferへ投入
+            # 5. Chunkを1フレームずつFrame Bufferへ展開
             # ----------------------------------------------------
+            # Chunkそのものはキューに積まず、pose/transの対応する
+            # 1フレームを個別に保存する。
             with buffer_condition:
-                chunk_buffer.append(data_dict)
+                for f_idx in range(frame_count):
+                    frame_buffer.append(
+                        (
+                            data_dict["trans"][f_idx],
+                            data_dict["pose"][f_idx]
+                        )
+                    )
 
-                # 4チャンク以上に増えた瞬間にcatch-up開始。
-                # 受信側で判定することで、4 -> 3 とpopleftした後に
-                # 4チャンク到達を取り逃がす問題を防ぐ。
-                if len(chunk_buffer) >= CATCHUP_START_CHUNKS:
-                    playback_speed = CATCHUP_SPEED
+                buffered_frame_count += frame_count
+                buffer_count = buffered_frame_count
 
-                buffer_count = len(chunk_buffer)
+                # 受信直後のバッファ量を表示。
+                # 速度はPlayback Worker側で毎フレーム再計算する。
                 current_speed = playback_speed
                 buffer_condition.notify()
 
-            # ----------------------------------------------------
-            # Debug Output
-            # ----------------------------------------------------
-            print(
-                f"\r[Buffer Stack]: {buffer_count} chunks | "
-                f"Speed: {current_speed:.1f}x",
-                end="",
-                flush=True
-            )
+            
 
 
     # ============================================================
@@ -324,43 +740,72 @@ def main():
     # ============================================================
     def playback_worker():
         nonlocal playback_speed
+        nonlocal buffered_frame_count
 
         # UDPソケットはスレッド開始時に1回だけ生成
         TARGET_IP = "127.0.0.1"
         TARGET_PORT = 9998
         vam_udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-        # 2フレームに1回送信するための連続カウンタ
+        # 2フレームに1回送信するための連続カウンタ。
+        # 60fps入力 × 1/2送信 = 約30fpsでVaMへ送信する。
         send_frame_counter = 0
         print("\n[Thread] Playback Worker Started. Target VAM UDP -> ", TARGET_PORT)
+        
+        print("[Motion] Waiting for audio timeline...")
+
+        timeline_started.wait()
+
+        print("[Motion] Timeline START")
 
         while True:
             # ====================================================
-            # BufferからChunkを1つ取得
+            # Frame Bufferから1フレーム取得
             # ====================================================
             with buffer_condition:
-                while len(chunk_buffer) == 0:
+                while len(frame_buffer) == 0:
                     buffer_condition.wait()
 
-                data_dict = chunk_buffer.popleft()
-                buffer_count = len(chunk_buffer)
+                current_trans, current_pose = frame_buffer.popleft()
+                buffered_frame_count -= 1
+                buffer_count = buffered_frame_count
 
-                # --- ヒステリシス速度制御 ---
-                # 4以上になったときに受信側で1.3xへ移行済み。
-                # 再生側では1以下まで減ったときだけ1.0xへ戻す。
-                if buffer_count <= CATCHUP_END_CHUNKS:
-                    playback_speed = NORMAL_SPEED
+                # ------------------------------------------------
+                # フレームバッファ量に応じたリアルタイム速度制御
+                #
+                # 目標以下なら1.00x。
+                # 目標を1フレーム超えるごとに0.01xだけ加速し、
+                # 最大1.15xまで。
+                #
+                # フレームは絶対に捨てない。
+                # ------------------------------------------------
+                error = buffer_count - TARGET_BUFFER_FRAMES
+
+                if error <= 0:
+                    target_speed = 1.0
+                else:
+                    target_speed = min(
+                        1.0 + error * 0.01,
+                        MAX_PLAYBACK_SPEED
+                    )
+
+                # 実際の速度を一気に変更しない
+                if playback_speed < target_speed:
+                    playback_speed = min(
+                        playback_speed + SPEED_RESPONSE,
+                        target_speed
+                    )
+                else:
+                    playback_speed = max(
+                        playback_speed - SPEED_RESPONSE,
+                        target_speed
+                    )
 
                 current_speed = playback_speed
 
             # ====================================================
-            # Chunk内フレームの再生ループ
+            # 1フレームの再生
             # ====================================================
-            frame_count = min(len(data_dict["pose"]), len(data_dict["trans"]))
-
-            for f_idx in range(frame_count):
-                current_trans = data_dict["trans"][f_idx]
-                current_pose = data_dict["pose"][f_idx]
 
                 # --- 1. mainController（シーンの絶対原点）は初期位置 (0,0,0) で完全に固定 ---
                 payload_parts = [
@@ -1059,9 +1504,23 @@ def main():
                         payload,
                         (TARGET_IP, TARGET_PORT)
                     )
+                    
+                # ----------------------------------------------------
+                # Debug Output
+                # ----------------------------------------------------
+                print(
+                    f"\r[Frame Buffer]: {buffer_count:3d} frames "
+                    f"({buffer_count * FRAME_DURATION * 1000:4.0f} ms) | "
+                    f"Speed: {current_speed:.2f}x",
+                    end="",
+                    flush=True
+                )
 
 
-                time.sleep(0.017 / playback_speed)
+                # 60fps入力を基準に再生。
+                # 1.00x = 約16.67ms/frame
+                # 1.15x = 約14.49ms/frame
+                time.sleep(FRAME_DURATION / playback_speed)
 
 
 
@@ -1071,6 +1530,13 @@ def main():
     server_socket.bind((SERVER_IP, SERVER_PORT))
     server_socket.listen(1)
     print(f"TCP Server started on port {SERVER_PORT}. Waiting for client connection...")
+    
+    # audio_thread = threading.Thread(
+        # target=audio_playback_worker,
+        # daemon=True
+    # )
+
+    # audio_thread.start()
 
     # 再生Workerは1つだけ起動。
     # バッファが空ならCondition.wait()で待機し、データが入れば即再生する。
