@@ -48,7 +48,7 @@ pip install -r requirements.txt
 ---
 
 ## Network & Components
-* **UDP Port:** `9998` (other settings match official config)
+* **UDP Port:** `9998` `9999`  (other settings match official config)
 * **vam_echoavatar_bridge.py**: Converts and routes motion data.
 * **EchoAvatarReceiver.cs**: VaM plugin applying the motion.
 
