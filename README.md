@@ -41,7 +41,7 @@ This bridge synchronizes body motion only. Facial expressions (Face) are not syn
 pip install -r requirements.txt
 ```
 3. Run the Python bridge: `python vam_echoavatar_bridge.py`
-4. Load `EchoAvatarReceiver.cs` into VaM.
+4. Load `EchoAvatarReceiver.cs` onto your target **Person Atom**.`EchoAvatarAudioReceiver.cs` onto **AudioSource Atom**.
 5. Start the EchoAvatar engine and wait for connection.
 6. Start the official EchoAvatar tool:`python tools/pushwav2server.py`.
 
