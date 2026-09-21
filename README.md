@@ -17,6 +17,21 @@ EchoAvatar → [TCP : 12346] → vam_echoavatar_bridge.py → [UDP : 9998] → E
 ```
 This bridge synchronizes body motion only. Facial expressions (Face) are not synchronized or controlled.
 
+---  
+
+### Key Updates in this Version 1.1.0
+* **Low Latency Implementation:** 
+  The data processing pipeline has been thoroughly optimized to minimize latency.
+* **Audio Passthrough:** 
+  Not only does the bridge send motion, but it now captures the audio returned from the EchoAvatar engine and streams it directly into the VaM environment.
+
+```text
+[Audio Input] → Streamer → EchoAvatar Engine (Linux)
+                                 │
+                                 ├── (Motion Data) ──> [UDP 9998] ──> EchoAvatarReceiver.cs (VaM)
+                                 └── (Audio Return) ──> [UDP 9999] ──> Real-Time Audio inside VaM
+```
+
 ---
 
 ## Setup Instructions
