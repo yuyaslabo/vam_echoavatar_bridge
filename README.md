@@ -21,7 +21,7 @@ This bridge synchronizes body motion only. Facial expressions (Face) are not syn
 
 ### Key Updates in this Version 1.1.0
 * **Low Latency Implementation:** 
-  The data processing pipeline has been thoroughly optimized to minimize latency.
+  The data processing pipeline has been optimized to minimize latency.
 * **Audio Passthrough:** 
   Not only does the bridge send motion, but it now captures the audio returned from the EchoAvatar engine and streams it directly into the VaM environment.
 
