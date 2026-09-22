@@ -1,7 +1,7 @@
 # EchoAvatar → Virt-A-Mate Bridge
 
 An unofficial bridge for using **EchoAvatar** with **Virt-A-Mate (VaM)**.  
-DEMO: [https://youtu.be/5KwQFCZ8y_Y?si=Dalfl6DBjnh7cgXg]  
+DEMO: https://youtu.be/5KwQFCZ8y_Y?si=Dalfl6DBjnh7cgXg  
 Original Project: [RobinWitch/EchoAvatar](https://github.com/RobinWitch/EchoAvatar)
 
 > [!NOTE]
