@@ -242,7 +242,7 @@ def main():
     # True  : 2フレームに1回だけVAMへ送信
     # False : 全フレーム送信
     # ------------------------------------------------------------
-    SEND_EVERY_OTHER_FRAME = False
+    SEND_EVERY_OTHER_FRAME = True
 
     playback_speed = NORMAL_SPEED
     
