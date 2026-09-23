@@ -5,7 +5,7 @@ import numpy as np
 import time
 import threading
 import base64
-import sounddevice as sd
+#import sounddevice as sd
 from collections import deque
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
@@ -242,7 +242,7 @@ def main():
     # True  : 2フレームに1回だけVAMへ送信
     # False : 全フレーム送信
     # ------------------------------------------------------------
-    SEND_EVERY_OTHER_FRAME = True
+    SEND_EVERY_OTHER_FRAME = False
 
     playback_speed = NORMAL_SPEED
     
